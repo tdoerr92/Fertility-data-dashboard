@@ -1,0 +1,753 @@
+---
+title: "Global fertility rates"
+author: "Tamara Dörr"
+format: dashboard
+theme: minty
+---
+
+# About {orientation="columns"}
+
+```{r echo=FALSE}
+#Load packages
+if(!require(pacman)) install.packages("pacman")
+pacman::p_load(tidyverse, 
+               here,
+               sf,
+               bslib, 
+               bsicons,
+               rnaturalearth, 
+               plotly, 
+               countrycode, 
+               htmltools, 
+               reactable,
+               janitor,
+               rgeoboundaries,
+               gapminder
+               )
+```
+
+
+##   
+Fertility rates are an important indicator for prediction of population development as they describe the average number of children a woman births during her lifetime.
+
+Fertility rates vary worldwide substantially, but there is an overall trend for decreasing number of children being born per woman. Numerous factors may play a role, i.e. the availability of contraceptives, postponement of family planning due to educational or career goals or the active decision against children.
+
+This dashboard is designed to give an overview of current global fertility rates and also their evolution in the last four decades. 
+
+Also, the association with economic wealth as surrogate for some of the above mentioned factors is graphically shown.
+
+For those having further interest in investigating the evolution of global fertility rates and also future estimates, the data can be downloaded directly from this dashboard.
+
+Have fun exploring these data.
+
+## {width=70%} {orientation="rows"}
+
+### 
+```{r}
+value_box(title="Fertility rates 2023",
+          value="Tab 2",
+            # use icon from bs icons
+          showcase=bs_icon("box-arrow-in-right"),
+            # put the showcase icon at the left
+          showcase_layout = "left center",
+            # choose background color for the box
+          theme=value_box_theme(bg = "cadetblue")
+          )
+```
+
+###
+```{r}
+value_box(title="Fertility rates and economic wealth",
+          value="Tab 3",
+          showcase=bs_icon("box-arrow-in-down-right"),
+          showcase_layout = "left center",
+          theme=value_box_theme(bg = "lightpink")
+          )
+```
+
+###
+```{r}
+value_box(title="Data sources & Download",
+          value="Tab 4",
+          showcase=bs_icon("box-arrow-in-down"),
+          showcase_layout = "left center",
+          theme=value_box_theme(bg = "lightgray")
+          )
+```
+
+
+
+# Fertility rates 2023
+
+```{r echo=FALSE}
+#Load data
+fertility <- read.csv("data/children_per_woman_total_fertility.csv")
+gdp <- read.csv("data/gdp_pcap.csv")
+population <- read.csv("data/population_data.csv")
+
+#reduce dataframe and pivot
+## fertility data
+fertility_clean <- fertility %>% 
+    # remove the "X" in front of the year variables
+  rename_with(~str_remove(.,"^X"), starts_with("X")) %>% 
+    # select only years 1990-2023
+  dplyr::select(!c("1800":"1979","2024":"2100")) %>% 
+    # pivot for later joining
+  pivot_longer(cols=2:45, names_to="year", values_to="fertility_rate") %>% 
+    # calculate average fertility rate globally
+  group_by(year) %>% 
+  mutate(average_fertility_rate=mean(fertility_rate, na.rm=T),
+         average_fertility_rate=round(average_fertility_rate, 2)) %>% 
+  ungroup()
+
+
+## gdp per capita data
+gdp_clean <- gdp %>% 
+    # remove the "X" in front of the year variables
+  rename_with(~str_remove(.,"^X"), starts_with("X")) %>% 
+    # select only years 1990-2023
+  dplyr::select(!c("1800":"1979", "2024":"2100")) %>% 
+  mutate(across(2:45, ~ case_when(
+    grepl("k$", .) ~ parse_number(.) * 1000,
+    grepl("M$", .) ~ parse_number(.) * 1000000,
+    TRUE ~ parse_number(.) 
+    ))) %>% 
+    # pivot for later joining
+  pivot_longer(cols=2:45, names_to="year", values_to="gdp")
+
+
+## population data
+population_clean <- population %>% 
+  # remove the "X" in front of the year variables
+  rename_with(~str_remove(.,"^X"), starts_with("X")) %>% 
+    # select only years 1990-2023
+  dplyr::select(!c("1800":"1979", "2024":"2100")) %>% 
+    # mutate all numbers to numeric values omitting "k" and "M"
+ mutate(across(2:45, ~ case_when(
+    grepl("k$", .) ~ parse_number(.) * 1000,
+    grepl("M$", .) ~ parse_number(.) * 1000000,
+    TRUE ~ parse_number(.)
+  ))) %>% 
+    # pivot for later joining
+  pivot_longer(cols=2:45, names_to="year", values_to="population")
+
+## join dataframes
+fertility_gdp <- fertility_clean %>% 
+  left_join(gdp_clean, by=c("country", "year")) %>% 
+  left_join(population_clean, by=c("country", "year"))
+```
+
+```{r echo=FALSE}
+#prepare data for value boxes on page 1
+## lowest fertility rate in 2023
+fertility_lowest <- fertility_gdp %>% 
+  filter(year=="2023") %>% 
+  arrange(fertility_rate) %>% 
+    # select the first
+  head(1)
+
+## highest fertility rate in 2023
+fertility_highest <- fertility_gdp %>% 
+  filter(year=="2023") %>% 
+  arrange(desc(fertility_rate)) %>% 
+  head(1)
+
+## average fertility rate in 2023
+fertility_average <- fertility_gdp %>%
+  filter(year=="2023") %>%
+  dplyr::select(average_fertility_rate) %>%
+  head(1)
+
+# create sparklines 
+## for lowest fertility rate in 2023
+sparkline_lowest <- 
+  fertility_gdp %>% 
+  filter(country==fertility_lowest$country) %>% 
+  plot_ly() %>%
+  add_lines(
+    x = ~year, y = ~fertility_rate,
+    color = I("white"), span = I(1),
+    fill = 'tozeroy', alpha = 0.2
+  ) %>%
+  layout(
+    xaxis = list(visible = F, showgrid = F, title = ""),
+    yaxis = list(visible = F, showgrid = F, title = ""),
+    hovermode = "x",
+    margin = list(t = 0, r = 0, l = 0, b = 0),
+    font = list(color = "white"),
+    paper_bgcolor = "transparent",
+    plot_bgcolor = "transparent"
+  ) %>%
+  config(displayModeBar = F) %>%
+  htmlwidgets::onRender(
+    "function(el) {
+      var ro = new ResizeObserver(function() {
+         var visible = el.offsetHeight > 100;
+         Plotly.relayout(el, {'xaxis.visible': visible});
+      });
+      ro.observe(el);
+    }"
+  )
+
+## for highest fertility rate in 2023
+sparkline_highest <- 
+  fertility_gdp %>% 
+  filter(country==fertility_highest$country) %>% 
+  plot_ly() %>%
+  add_lines(
+    x = ~year, y = ~fertility_rate,
+    color = I("white"), span = I(1),
+    fill = 'tozeroy', alpha = 0.2
+  ) %>%
+  layout(
+    xaxis = list(visible = F, showgrid = F, title = ""),
+    yaxis = list(visible = F, showgrid = F, title = ""),
+    hovermode = "x",
+    margin = list(t = 0, r = 0, l = 0, b = 0),
+    font = list(color = "white"),
+    paper_bgcolor = "transparent",
+    plot_bgcolor = "transparent"
+  ) %>%
+  config(displayModeBar = F) %>%
+  htmlwidgets::onRender(
+    "function(el) {
+      var ro = new ResizeObserver(function() {
+         var visible = el.offsetHeight > 100;
+         Plotly.relayout(el, {'xaxis.visible': visible});
+      });
+      ro.observe(el);
+    }"
+  )
+
+## for average fertility rate in 2023
+sparkline_average <- 
+  fertility_gdp %>% 
+  filter(country==fertility_highest$country) %>% 
+  plot_ly() %>%
+  add_lines(
+    x = ~year, y = ~average_fertility_rate,
+    color = I("white"), span = I(1),
+    fill = 'tozeroy', alpha = 0.2
+  ) %>%
+  layout(
+    xaxis = list(visible = F, showgrid = F, title = ""),
+    yaxis = list(visible = F, showgrid = F, title = ""),
+    hovermode = "x",
+    margin = list(t = 0, r = 0, l = 0, b = 0),
+    font = list(color = "white"),
+    paper_bgcolor = "transparent",
+    plot_bgcolor = "transparent"
+  ) %>%
+  config(displayModeBar = F) %>%
+  htmlwidgets::onRender(
+    "function(el) {
+      var ro = new ResizeObserver(function() {
+         var visible = el.offsetHeight > 100;
+         Plotly.relayout(el, {'xaxis.visible': visible});
+      });
+      ro.observe(el);
+    }"
+  )
+
+```
+
+## Row 1 Value Boxes {height 35%}
+
+```{r}
+#create value boxes No. 1
+value_box(title=paste0("Lowest fertility rate 2023: ",fertility_lowest$country),
+                              value=fertility_lowest$fertility_rate,
+                              showcase=sparkline_lowest,
+                              theme=value_box_theme(bg = "lightpink") 
+)
+```
+
+```{r}
+# No. 2
+value_box(title=paste0("Highest fertility rate 2023: ",fertility_highest$country),
+                              value=fertility_highest$fertility_rate,
+                              showcase=sparkline_highest,
+                              theme=value_box_theme(bg = "turquoise") 
+)
+```
+
+```{r}
+# No. 3
+value_box(title= "Global average fertility rate 2023",
+          value=fertility_average$average_fertility_rate,
+          showcase=sparkline_average,
+          theme=value_box_theme(bg = "plum") 
+)
+```
+
+## Row 2 Map + Plot
+
+### Fertility rates worldwide 2023 {width="60%"}
+
+```{r echo=FALSE}
+#prepare data for map
+##load map data
+countries<-rnaturalearth::ne_countries(returnclass="sf") %>% 
+    # select only relevant geometry data
+  dplyr::select(name_sort, geometry)
+
+## refine map data
+fertility_gdp_map<- fertility_gdp %>% 
+    # filter for countries with geometry data (omit islands)
+  dplyr::filter(!country%in% c("Aruba","Antigua and Barbuda","Bahrain", "Barbados",
+                               "Channel Islands", "Comoros", "Cape Verde",
+                               "Micronesia, Fed. Sts.", "Guadeloupe", "Grenada", 
+                               "Guam", "Hong Kong, China", "Kiribati", "St. Lucia",
+                               "Macao, China", "Maldives", "Malta", "Martinique",
+                               "Mauritius","Mayotte","Netherlands Antilles", 
+                               "French Polynesia", "Reunion", "Singapore", 
+                               "Sao Tome and Principe","Seychelles","Tonga",
+                               "St. Vincent and the Grenadines", "Samoa",
+                               "Virgin Islands (U.S.)")) %>% 
+    # change country names to align the two dataframes for joining
+  mutate(country=case_when(country=="UAE"~"United Arab Emirates",
+                           country=="Bahamas"~"Bahamas, The",
+                           country=="Cote d'Ivoire"~"Côte d'Ivoire",
+                           country=="Czech Republic"~"Czechia",
+                           country=="Egypt"~"Egypt, Arab Rep.",
+                           country=="UK"~"United Kingdom",
+                           country=="Gambia"~"Gambia, The",
+                           country=="French Guiana"~"Guyana",
+                           country=="Iran"~"Iran, Islamic Rep.",
+                           country=="South Korea"~"Korea, Dem. Rep.",
+                           country=="Lao"~"Lao PDR",
+                           country=="North Korea"~"Korea, Rep.",
+                           country=="Palestine"~"Palestine (West Bank and Gaza)",
+                           country=="Russia"~"Russian Federation",
+                           country=="Syria"~"Syrian Arab Republic",
+                           country=="USA"~"United States of America",
+                           country=="Venezuela"~"Venezuela, RB",
+                           country=="Eswatini"~"eSwatini",
+                           country=="Yemen"~"Yemen, Rep.",
+                           TRUE~country
+                           ))
+## checkpoint
+# countries_sorted<-countries[order(countries$name_sort), ]
+# print(countries_sorted$name_sort)
+# setdiff(fertility_gdp_map$country, countries$name_sort)
+# setdiff(countries$name_sort, fertility_gdp_map$country)
+
+#join  datasets for map
+fertility_gdp_map_all<-fertility_gdp_map %>% 
+    # join
+  full_join(countries, by=c("country"="name_sort")) %>% 
+    # create tooltip label for maps
+  mutate(tooltip_label = paste0(country, ": ", fertility_rate))
+
+#create map for page 1 (only current situation 2023)
+## create subsetted dataset
+fertility_data_2023<- fertility_gdp_map_all %>% 
+    #filter year
+  filter(year=="2023")
+
+## create plot
+fertility_map_2023<-
+  ggplot(fertility_data_2023)+
+  geom_sf(aes(fill = fertility_rate, geometry=geometry, text = tooltip_label))+
+    # manually define colors for gradient to match the overall theme
+  scale_fill_gradient(low="lavenderblush", high="mediumblue", na.value="white")+
+  theme_void() +
+    # define legend and title text
+  labs(title="Mean fertility rate by Country 2023")+
+  theme(legend.position = "none")
+
+# save plot in images folder 
+ggsave("images/fertility_map_2023.png", fertility_map_2023)
+
+## create plotly
+plotly_fertility_map_2023 <- ggplotly(fertility_map_2023,
+                           tooltip = "text")
+```
+
+```{r}
+plotly_fertility_map_2023
+```
+
+### Top 20 countries 2023 {width="40%"}
+
+```{r echo=FALSE}
+# prepare data for plot
+fertility_top20 <- fertility_data_2023 %>%
+  arrange(desc(fertility_rate)) %>% 
+  head(20) %>% 
+  mutate(tooltip_label2 = paste0(country, "<br>","Fertility rate: ", fertility_rate, "<br>"))
+
+# create plot
+top20_plot <- ggplot(fertility_top20,
+                     mapping=aes(x=fertility_rate,
+                                 y = reorder(country, fertility_rate),
+                                 text=tooltip_label2))+
+  geom_col(fill="lightpink")+
+  labs(title="Top 20 fertility rates in 2023",
+       x="",
+       y="")+
+  theme_minimal()
+
+# save plot in images folder 
+ggsave("images/top20_plot.png", top20_plot)
+
+# create plotly  
+top20_plotly <- ggplotly(top20_plot, tooltip="text")
+```
+
+```{r}
+top20_plotly
+```
+
+# Fertility rates and economic wealth 1980-2020
+
+```{r}
+# create value boxes for page 2
+## average reduction in fertility rate 
+average_red <- fertility_gdp %>% 
+  dplyr::select(year, average_fertility_rate) %>% 
+  unique() %>% 
+    # calculate the mean difference between two consecutive years
+  mutate(difference=(average_fertility_rate-lag(average_fertility_rate)),
+         mean_difference_rate=mean(difference, na.rm=T),
+         mean_difference_rate=round(mean_difference_rate, digits=2)) %>% 
+  dplyr::select(mean_difference_rate) %>% 
+  head(1)
+
+## average change of gdp 
+average_gdp <- fertility_gdp %>% 
+  dplyr::select(year, gdp) %>% 
+  unique() %>% 
+  mutate(difference_gdp=(gdp-lag(gdp)),
+         mean_difference_gdp=mean(difference_gdp, na.rm=T),
+         mean_difference_gdp=round(mean_difference_gdp, digits=2)) %>% 
+  dplyr::select(mean_difference_gdp) %>% 
+  head(1)
+```
+
+## Value box {height="25%"}
+
+```{r}
+# value boxes on page 2; No. 1
+value_box(title="Average reduction in global fertility rate per year (1980-2023)",
+          value=average_red$mean_difference_rate,
+          showcase=bs_icon("arrow-down-right-circle"),
+          theme=value_box_theme(bg="plum"))
+```
+
+```{r}
+# value boxes on page 2; No. 2
+value_box(title="Average change in GDP per capita per year (1980-2023)",
+          value=paste0("+", average_gdp$mean_difference_gdp),
+          showcase=bs_icon("arrow-up-right-circle"),
+          theme=value_box_theme(bg="lightseagreen"))
+```
+
+## Row2 {height="75%"}
+
+```{r echo=FALSE}
+#prepare data for plot
+fertility_gdp_new <- fertility_gdp %>% 
+    # rename countries to match the datasets for later joining
+  mutate(country=case_when(country=="UAE"~"United Arab Emirates",
+                           country=="Bahamas"~"Bahamas, The",
+                           country=="UK"~"United Kingdom",
+                           country=="French Guiana"~"Guyana",
+                           country=="South Korea"~"Korea, Dem. Rep.",
+                           country=="Lao"~"Lao PDR",
+                           country=="North Korea"~"Korea, Rep.",
+                           country=="Palestine"~"West Bank and Gaza",
+                           country=="Russia"~"Russian Federation",
+                           country=="USA"~"United States",
+                           country=="Eswatini"~"eSwatini",
+                           country=="Yemen"~"Yemen, Rep.",
+                           TRUE~country
+                           ))
+continents<-gapminder %>% 
+  dplyr::select(country, continent) %>%
+    # remove "Swaziland" as not in the datasets
+  filter(!(country=="Swaziland")) 
+
+fertility_gdp_continents <- fertility_gdp_new %>% 
+  left_join(continents, by="country") %>% 
+    #add
+  mutate(continent=(case_when(country=="Aruba"~"Americas",
+                              country=="Netherlands Antilles"~"Americas",
+                              country=="United Arab Emirates"~"Asia",
+                              country=="Armenia"~"Asia",
+                              country=="Antigua and Barbuda"~"Americas",
+                              country=="Azerbaijan"~"Asia",
+                              country=="Bahamas, The"~"Americas",
+                              country=="Belarus"~"Europe",
+                              country=="Belize"~"Americas",
+                              country=="Barbados"~"Americas",
+                              country=="Brunei"~"Asia",
+                              country=="Bhutan"~"Asia",
+                              country=="Channel Islands"~"Europe",
+                              country=="Cyprus"~"Europe",
+                              country=="Western Sahara"~"Africa",
+                              country=="Estonia"~"Europe",
+                              country=="Fiji"~"Oceania",
+                              country=="Micronesia, Fed. Sts."~"Oceania",
+                              country=="Georgia"~"Europe",
+                              country=="Guadeloupe"~"Americas",
+                              country=="Greenland"~"Europe",
+                              country=="Guam"~"Oceania",
+                              country=="Kazakhstan"~"Asia",
+                              country=="Kyrgyz Republic"~"Asia",
+                              country=="Kiribati"~"Oceania",
+                              country=="Lao PDR"~"Asia",
+                              country=="St. Lucia"~"Americas",
+                              country=="Lithuania"~"Europe",
+                              country=="Luxembourg"~"Europe",
+                              country=="Latvia"~"Europe",
+                              country=="Macao, China"~"Asia",
+                              country=="Moldova"~"Europe",
+                              country=="Maldives"~"Asia",
+                              country=="North Macedonia"~"Europe",
+                              country=="Malta"~"Europe",
+                              country=="Martinique"~"Americas",
+                              country=="Mayotte"~"Africa",
+                              country=="New Caledonia"~"Oceania",
+                              country=="Papua New Guinea"~"Asia",
+                              country=="French Polynesia"~"Oceania",
+                              country=="Qatar"~"Asia",
+                              country=="Russian Federation"~"Asia",
+                              country=="Solomon Islands"~"Oceania",
+                              country=="South Sudan"~"Africa",
+                              country=="Suriname"~"Africa",
+                              country=="eSwatini"~"Africa",
+                              country=="Seychelles"~"Africa",
+                              country=="Tajikistan"~"Asia",
+                              country=="Turkmenistan"~"Asia",
+                              country=="Timor-Leste"~"Asia",
+                              country=="Tonga"~"Oceania",
+                              country=="Ukraine"~"Europe",
+                              country=="Uzbekistan"~"Asia",
+                              country=="St. Vincent and the Grenadines"~"Oceania",
+                              country=="Vanuatu"~"Oceania",
+                              country=="Samoa"~"Oceania",
+                              country=="Cape Verde"~"Africa",
+                              country=="Guyana"~"Americas",
+                              country=="Grenada"~"Americas",
+                              country=="Virgin Islands (U.S.)"~"Americas",
+                              TRUE~continent
+                              )),
+         tooltip_label = paste0(country, " ",year, "<br>","Fertility rate: ", fertility_rate, "<br>","GDP per capita: ", gdp))
+
+# setdiff(fertility_gdp_new$country, continents$country)
+# setdiff(continents$country, fertility_gdp_new$country)
+
+fertility_plot <- fertility_gdp_continents %>% 
+  filter(!is.na(population))
+# create plot
+plot<- ggplot(fertility_plot,
+       aes(x=gdp, 
+           y=fertility_rate, 
+           frame=year, 
+           text=tooltip_label))+
+ geom_point(aes(size=population, 
+                color=continent), show.legend = F)+
+  labs(title="Fertility rate and economic wealth by country",
+       x="GDP per capita",
+       y="Fertility rate")+
+  scale_color_manual(values = c("Africa"="blue", "Americas"="orchid", "Europe"="lightpink", "Oceania"="orangered", "Asia"="palegreen")) 
+
+# create plotly
+p<- ggplotly(plot, tooltip="text") %>% 
+  layout(
+    legend = list(
+      orientation = "v",
+      x = 1,
+      y = 1,
+      traceorder = "grouped"
+    ),
+    annotations = list(
+      list(
+        x = 1.2,
+        y = 0.025,
+        text = paste0("size of dot", "<br>","corresponds to", "<br>", "population size"),
+        showarrow = FALSE,
+        xref = "paper",
+        yref = "paper",
+        align = "left",
+        font = list(size = 10)
+      )
+    )
+  )
+
+
+```
+
+###  {width="50%"}
+
+```{r}
+p
+```
+
+```{r echo=FALSE}
+#create maps  (different tabs for different decades)
+## year:2020
+fertility_data_2020<- fertility_gdp_map_all %>% 
+  filter(year=="2020")
+fertility_map_2020<-
+  ggplot(fertility_data_2020)+
+  geom_sf(aes(fill = fertility_rate, geometry=geometry, text = tooltip_label))+
+  scale_fill_gradient(low="lavenderblush", high="darkmagenta", na.value="white")+
+  theme_void() +
+  labs(title="Mean fertility rate by Country 2020")+
+  theme(legend.position = "none")
+
+# save plot in images folder 
+ggsave("images/fertility_map_2020.png", fertility_map_2020)
+
+# create plotly
+plotly_fertility_map_2020 <- ggplotly(fertility_map_2020,
+                           tooltip = "text")
+
+## year:2010
+fertility_data_2010<- fertility_gdp_map_all %>% 
+  filter(year=="2010")
+fertility_map_2010<-
+  ggplot(fertility_data_2010)+
+  geom_sf(aes(fill = fertility_rate, geometry=geometry, text = tooltip_label))+
+  scale_fill_gradient(low="lavenderblush", high="darkmagenta", na.value="white")+
+  theme_void() +
+  labs(title="Mean fertility rate by Country 2010")+
+  theme(legend.position = "none")
+
+# save plot in images folder 
+ggsave("images/fertility_map_2010.png", fertility_map_2010)
+
+# create plotly
+plotly_fertility_map_2010 <- ggplotly(fertility_map_2010,
+                           tooltip = "text")
+
+## year:2000
+fertility_data_2000<- fertility_gdp_map_all %>% 
+  filter(year=="2000")
+fertility_map_2000<-
+  ggplot(fertility_data_2000)+
+  geom_sf(aes(fill = fertility_rate, geometry=geometry, text = tooltip_label))+
+  scale_fill_gradient(low="lavenderblush", high="darkmagenta", na.value="white")+
+  theme_void() +
+  labs(title="Mean fertility rate by Country 2000")+
+  theme(legend.position = "none")
+
+# save plot in images folder 
+ggsave("images/fertility_map_2000.png", fertility_map_2000)
+
+# create plotly
+plotly_fertility_map_2000 <- ggplotly(fertility_map_2000,
+                           tooltip = "text")
+
+## year:1990
+fertility_data_1990<- fertility_gdp_map_all %>% 
+  filter(year=="1990")
+fertility_map_1990<-
+  ggplot(fertility_data_1990)+
+  geom_sf(aes(fill = fertility_rate, geometry=geometry, text = tooltip_label))+
+  scale_fill_gradient(low="lavenderblush", high="darkmagenta", na.value="white")+
+  theme_void() +
+  labs(title="Mean fertility rate by Country 1990")+
+  theme(legend.position = "none")
+
+# save plot in images folder 
+ggsave("images/fertility_map_1990.png", fertility_map_1990)
+
+# create plotly
+plotly_fertility_map_1990 <- ggplotly(fertility_map_1990,
+                           tooltip = "text")
+
+## year:1980
+fertility_data_1980<- fertility_gdp_map_all %>% 
+  filter(year=="1980")
+fertility_map_1980<-
+  ggplot(fertility_data_1980)+
+  geom_sf(aes(fill = fertility_rate, geometry=geometry, text = tooltip_label))+
+  scale_fill_gradient(low="lavenderblush", high="darkmagenta", na.value="white")+
+  theme_void() +
+  labs(title="Mean fertility rate by Country 1980")+
+  theme(legend.position = "none")
+
+# save plot in images folder 
+ggsave("images/fertility_map_1980.png", fertility_map_1980)
+
+# create plotly
+plotly_fertility_map_1980 <- ggplotly(fertility_map_1980,
+                           tooltip = "text")
+```
+
+###  {.tabset}
+
+#### 1980
+
+```{r}
+plotly_fertility_map_1980
+```
+
+#### 1990
+
+```{r}
+plotly_fertility_map_1990
+```
+
+#### 2000
+
+```{r}
+plotly_fertility_map_2000
+```
+
+#### 2010
+
+```{r}
+plotly_fertility_map_2010
+```
+
+#### 2020
+
+```{r}
+plotly_fertility_map_2020
+```
+
+# Data & Data sources 
+
+##  {.tabset}
+
+### Fertility data
+
+```{r echo=FALSE}
+
+htmltools::browsable(
+  tagList(
+    reactable(fertility_clean, 
+              
+              searchable = T, 
+              filterable = T)))
+```
+
+### GDP data
+
+```{r}
+htmltools::browsable(
+  tagList(
+    reactable(gdp_clean, 
+              
+              searchable = T, 
+              filterable = T)))
+```
+
+### Population data
+
+```{r}
+htmltools::browsable(
+  tagList(
+    reactable(population_clean, 
+              
+              searchable = T, 
+              filterable = T)))
+```
+
+### Data source
+<a href="https://www.gapminder.org/data/" target="_blank">Click here to visit Gapminder</a>
+
